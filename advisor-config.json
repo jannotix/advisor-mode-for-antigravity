@@ -1,0 +1,26 @@
+{
+  "enabled": true,
+  "roles": {
+    "advisor": {
+      "label": "Frontier Advisor (Pro Tier)",
+      "subagentName": "advisor-reviewer",
+      "subagentTier": "pro",
+      "uiModelPatterns": ["pro", "argon", "ultra", "high"]
+    },
+    "executor": {
+      "label": "Fast Executor (Flash Tier)",
+      "subagentName": "flash-executor",
+      "subagentTier": "flash",
+      "uiModelPatterns": ["flash", "lite", "fast"]
+    }
+  },
+  "gates": {
+    "planBeforeComplexTask": true,
+    "maxConsecutiveFailures": 2,
+    "mandatoryFinalReview": true
+  },
+  "defaults": {
+    "simplicityIntensity": "full",
+    "actionFirstOutput": true
+  }
+}

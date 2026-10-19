@@ -1,0 +1,21 @@
+{
+  "name": "advisor-mode-for-antigravity",
+  "displayName": "Advisor Mode for Antigravity",
+  "version": "1.0.0",
+  "description": "Bivalent Advisor/Reviewer (pro tier) and Executor (flash tier) architecture for Antigravity with built-in minimalist engineering, clean prose, action-first communication, and UI craft rules.",
+  "author": {
+    "name": "Gianluca Iannotta",
+    "url": "https://github.com/jannotix"
+  },
+  "homepage": "https://github.com/jannotix/advisor-mode-for-antigravity",
+  "repository": "https://github.com/jannotix/advisor-mode-for-antigravity",
+  "license": "Apache-2.0",
+  "keywords": [
+    "antigravity",
+    "advisor-mode",
+    "subagents",
+    "code-review",
+    "yagni",
+    "minimalist-engineering"
+  ]
+}

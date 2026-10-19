@@ -1,0 +1,31 @@
+{
+  "advisor-mode-lifecycle": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./scripts/advisor-hook.mjs SessionStart",
+        "timeout": 10
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/advisor-hook.mjs PostToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./scripts/advisor-hook.mjs PreInvocation",
+        "timeout": 10
+      }
+    ]
+  }
+}

@@ -1,6 +1,7 @@
 {
   "enabled": true,
   "roles": {
+    "unknownModelRole": "executor",
     "advisor": {
       "label": "Frontier Advisor (Pro Tier)",
       "subagentName": "advisor-reviewer",

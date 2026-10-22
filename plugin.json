@@ -1,7 +1,7 @@
 {
   "name": "advisor-mode-for-antigravity",
   "displayName": "Advisor Mode for Antigravity",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Bivalent Advisor/Reviewer (pro tier) and Executor (flash tier) architecture for Antigravity with built-in minimalist engineering, clean prose, action-first communication, and UI craft rules.",
   "author": {
     "name": "Gianluca Iannotta",

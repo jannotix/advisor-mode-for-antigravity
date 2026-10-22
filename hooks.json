@@ -8,9 +8,21 @@
         "timeout": 10
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_file|edit_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/advisor-hook.mjs PreToolUse",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
-        "matcher": "run_command",
+        "matcher": "run_command|write_file|edit_file|replace_file_content|multi_replace_file_content|invoke_subagent|send_message",
         "hooks": [
           {
             "type": "command",
@@ -24,6 +36,13 @@
       {
         "type": "command",
         "command": "node ./scripts/advisor-hook.mjs PreInvocation",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./scripts/advisor-hook.mjs Stop",
         "timeout": 10
       }
     ]

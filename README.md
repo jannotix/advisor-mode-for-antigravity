@@ -11,8 +11,8 @@ Advisor Mode introduces a bivalent workflow that adapts based on the active UI m
 ### 1. Executor UI Mode (Fast Model)
 When the interactive session runs on the fast model tier, the agent acts as the Executor and must consult the Advisor subagent (`advisor-reviewer`, `pro` tier) at three mandatory gates:
 - **Architecture, Planning & Pre-Task Gate**: Triggers whenever planning or designing a SaaS, product, system architecture, specification, or roadmap (even when no code is written yet), as well as before multi-file or sensitive edits. Validates architecture, boundaries, and acceptance checks.
-- **Two-Strike Circuit Breaker**: Automatically triggers when two consecutive command failures occur, halting blind retry loops.
-- **Mandatory Final Task Review Gate**: Requires an audit of diffs, security invariants, and complexity cuts before concluding any task.
+- **Two-Strike Circuit Breaker**: Automatically triggers when two consecutive command failures occur, halting blind retry loops until consultation with the Advisor.
+- **Mandatory Final Task Review Gate**: Requires an audit of diffs, security invariants, complexity cuts, and matching file hashes before concluding any task.
 
 ### 2. Advisor/Architect UI Mode (Frontier Model)
 When the interactive session runs on the frontier model tier, the agent acts directly as Architect, Advisor, and Final Reviewer. It delegates implementation tasks to the fast Executor subagent (`flash-executor`, `flash` tier) and audits results before closing tasks.
@@ -45,6 +45,7 @@ Settings are stored in `advisor-config.json` inside the plugin directory:
 {
   "enabled": true,
   "roles": {
+    "unknownModelRole": "executor",
     "advisor": {
       "label": "Frontier Advisor (Pro Tier)",
       "subagentName": "advisor-reviewer",
@@ -70,11 +71,23 @@ Settings are stored in `advisor-config.json` inside the plugin directory:
 }
 ```
 
+- `roles.unknownModelRole`: Sets the default role (`"executor"` or `"advisor"`) when the active UI model pattern is unrecognized. Defaults to fail-closed `"executor"`.
+
+## Lifecycle Hooks
+
+Advisor Mode registers 5 lifecycle hooks in `hooks.json`:
+1. `SessionStart`: Detects model tier and role, injecting operational gate directives and defaults.
+2. `PreToolUse`: Enforces the Pre-Task Plan Gate (blocking unvalidated multi-file modifications) and blocks commands or edits when the circuit breaker is tripped.
+3. `PostToolUse`: Tracks command failures, normalizes error signatures, monitors file modifications with SHA-256 hashes, and records Advisor reviews.
+4. `PreInvocation`: Injects ephemeral warnings when the circuit breaker is active without resetting the breaker state.
+5. `Stop`: Enforces the Mandatory Final Task Review Gate, verifying that all modified files have an approved Advisor review matching their current on-disk SHA-256 hashes before task completion.
+
 ## Repository Structure
 
 - `plugin.json`: Plugin manifest for Antigravity.
-- `hooks.json`: Lifecycle hook definitions for session startup, command tracking, and circuit breaker.
-- `scripts/advisor-hook.mjs`: Lightweight cross-platform Node.js lifecycle hook runner.
+- `hooks.json`: Lifecycle hook definitions for session startup, command tracking, tool validation, and completion gating.
+- `scripts/advisor-hook.mjs`: Lightweight cross-platform Node.js lifecycle hook runner and gate validator.
+- `tests/advisor-hook.test.mjs`: Automated test suite covering all roles, gates, signatures, and file hash verifications.
 - `rules/AGENTS.md`: Core rules enforced across all agent sessions.
 - `agents/advisor-reviewer.md`: Frontier advisor, architect, and reviewer subagent specification.
 - `agents/flash-executor.md`: Fast implementation executor subagent specification.
@@ -85,6 +98,10 @@ Settings are stored in `advisor-config.json` inside the plugin directory:
 Execute test runs against the Node.js hook runner:
 
 ```bash
+# Run unit and integration test suite
+node --test tests/advisor-hook.test.mjs
+
+# Dry run session start hook
 node ./scripts/advisor-hook.mjs SessionStart
 ```
 

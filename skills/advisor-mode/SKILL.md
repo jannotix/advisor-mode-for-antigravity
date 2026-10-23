@@ -23,6 +23,7 @@ Manage the Advisor Mode configuration stored at `<antigravity-config-dir>/plugin
   - `subagentTier`: tier passed when invoking the subagent (`"flash"`).
   - `uiModelPatterns`: substrings matched against `modelName` at session start to detect when the UI runs the Executor model.
 - `gates.planBeforeComplexTask`: enforces pre-task architecture validation before multi-file edits (default: `true`).
+- `gates.planGateMinFiles`: minimum number of distinct modified files required to trigger the Pre-Task Plan Gate (default: `2`).
 - `gates.maxConsecutiveFailures`: number of consecutive command errors before the hook fires the Two-Strike Circuit Breaker (default: `2`, set to `0` to disable).
 - `gates.mandatoryFinalReview`: enforces approved final review and file hash verification before task completion (default: `true`).
 - `defaults.simplicityIntensity`: baseline minimalist engineering rigor (`"full"`).

@@ -42,20 +42,24 @@ function normalizeFailureSignature(p) {
 
 export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) {
   const safePluginDir = pluginDir || process.cwd();
+  const neutralOutput = (ev) => (ev === 'PreToolUse' ? { decision: 'allow' } : {});
   try {
     const configPath = path.join(safePluginDir, 'advisor-config.json');
-    if (!fsImpl.existsSync(configPath)) return {};
+    if (!fsImpl.existsSync(configPath)) return neutralOutput(event);
 
     let cfg = {};
     try {
       cfg = JSON.parse(fsImpl.readFileSync(configPath, 'utf8'));
     } catch {
-      return {};
+      return neutralOutput(event);
     }
-    if (!cfg.enabled) return {};
+    if (!cfg.enabled) return neutralOutput(event);
 
     const stateDir = path.join(safePluginDir, '.state');
-    const convId = (payload?.conversationId && typeof payload.conversationId === 'string') ? payload.conversationId : 'default';
+    const fbSource = payload?.transcriptPath || payload?.artifactDirectoryPath || payload?.workspacePaths?.[0] || '';
+    const convId = (payload?.conversationId && typeof payload.conversationId === 'string' && payload.conversationId.trim())
+      ? payload.conversationId.trim()
+      : (fbSource ? 'ctx_' + crypto.createHash('sha256').update(String(fbSource)).digest('hex').slice(0, 16) : 'default');
     const stateFile = path.join(stateDir, `${convId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
 
     let state = {};
@@ -66,6 +70,7 @@ export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) 
     state.modifiedFiles = state.modifiedFiles || {};
     state.verifiedFiles = state.verifiedFiles || {};
     state.circuitBreakerTripped = Boolean(state.circuitBreakerTripped);
+    if (payload?.transcriptPath && !state.transcriptPath) state.transcriptPath = payload.transcriptPath;
 
     const persistState = () => {
       if (!fsImpl.existsSync(stateDir)) fsImpl.mkdirSync(stateDir, { recursive: true });
@@ -95,6 +100,7 @@ export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) 
     state.role = role;
 
     const planBeforeComplexTask = cfg.gates?.planBeforeComplexTask !== false;
+    const planGateMinFiles = Math.max(1, Number(cfg.gates?.planGateMinFiles ?? 2));
     const maxFail = cfg.gates?.maxConsecutiveFailures !== undefined ? Number(cfg.gates.maxConsecutiveFailures) : 2;
     const breakerEnabled = maxFail > 0;
     const mandatoryFinalReview = cfg.gates?.mandatoryFinalReview !== false;
@@ -144,7 +150,7 @@ export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) 
         const targetFile = extractTargetFile(args);
         const distinct = new Set(Object.keys(state.modifiedFiles || {}));
         if (targetFile) distinct.add(targetFile);
-        if (distinct.size >= 2 && !state.planValidatedByAdvisor) {
+        if (distinct.size >= planGateMinFiles && !state.planValidatedByAdvisor) {
           return { decision: 'deny', reason: `[PRE-TASK PLAN GATE] Multi-file edit blocked. Invoke subagent '${advisorSub}' (Model='${advisorTier}') to validate the architecture and plan before modifying multiple files.` };
         }
       }
@@ -200,6 +206,8 @@ export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) 
 
       if (isAdvisorCall) {
         state.advisorConversationId = payload.toolResult?.conversationId || payload.conversationIdFetched || payload.conversationId || state.advisorConversationId || '';
+        state.lastAdvisorInvokeStep = payload.stepIdx ?? 0;
+        if (payload.transcriptPath) state.transcriptPath = payload.transcriptPath;
         state.planValidatedByAdvisor = true;
         state.circuitBreakerTripped = false;
         state.circuitBreakerReason = '';
@@ -208,12 +216,13 @@ export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) 
         state.lastError = '';
         state.lastErrorSignature = '';
 
-        const outputText = JSON.stringify(payload.toolResult ?? payload.output ?? payload.result ?? payload.reviewVerdict ?? '');
+        const hasSyncOutput = payload.toolResult !== undefined || payload.output !== undefined || payload.result !== undefined || payload.reviewVerdict !== undefined;
+        const outputText = hasSyncOutput ? JSON.stringify(payload.toolResult ?? payload.output ?? payload.result ?? payload.reviewVerdict ?? '') : '';
         if (outputText.includes('CHANGES_REQUIRED')) {
           state.reviewStatus = 'CHANGES_REQUIRED';
           state.needsFinalReview = true;
           state.lastReview = { reviewer: advisorSub, tier: advisorTier, verdict: 'CHANGES_REQUIRED', stepIdx: payload.stepIdx ?? 0, reviewedAt: new Date().toISOString() };
-        } else {
+        } else if (hasSyncOutput || !state.transcriptPath) {
           state.verifiedFiles = {};
           for (const [fp, meta] of Object.entries(state.modifiedFiles || {})) {
             let currentHash = meta.hash;
@@ -236,6 +245,44 @@ export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) 
 
     if (event === 'Stop') {
       if (payload?.terminationReason === 'USER_CANCELED' || payload?.fullyIdle === false) return {};
+
+      const tp = payload?.transcriptPath || state.transcriptPath;
+      if (tp && fsImpl.existsSync(tp)) {
+        try {
+          const lines = fsImpl.readFileSync(tp, 'utf8').split(/\r?\n/).filter(l => l.trim());
+          let latestVerdict = '';
+          const maxModStep = Math.max(0, ...Object.values(state.modifiedFiles || {}).map(m => Number(m.stepIdx) || 0));
+          const minStep = Math.max(Number(state.lastAdvisorInvokeStep) || 0, maxModStep);
+          for (const line of lines) {
+            try {
+              const entry = JSON.parse(line);
+              const sIdx = entry.step_index ?? entry.stepIdx;
+              if (sIdx !== undefined && sIdx > minStep && (entry.type === 'SYSTEM_MESSAGE' || entry.source === 'SYSTEM')) {
+                const txt = typeof entry.content === 'string' ? entry.content : JSON.stringify(entry);
+                if (txt.includes('CHANGES_REQUIRED')) latestVerdict = 'CHANGES_REQUIRED';
+                else if (txt.includes('APPROVED')) latestVerdict = 'APPROVED';
+              }
+            } catch {}
+          }
+          if (latestVerdict === 'CHANGES_REQUIRED') {
+            state.reviewStatus = 'CHANGES_REQUIRED';
+            state.needsFinalReview = true;
+            state.lastReview = { reviewer: advisorSub, tier: advisorTier, verdict: 'CHANGES_REQUIRED', stepIdx: minStep, reviewedAt: new Date().toISOString() };
+            persistState();
+          } else if (latestVerdict === 'APPROVED' && Object.keys(state.modifiedFiles || {}).length > 0) {
+            state.verifiedFiles = {};
+            for (const [fp, meta] of Object.entries(state.modifiedFiles || {})) {
+              let currentHash = meta.hash;
+              try { if (fsImpl.existsSync(fp)) currentHash = crypto.createHash('sha256').update(fsImpl.readFileSync(fp)).digest('hex'); } catch {}
+              state.verifiedFiles[fp] = currentHash;
+            }
+            state.reviewStatus = 'APPROVED';
+            state.needsFinalReview = false;
+            state.lastReview = { reviewer: advisorSub, tier: advisorTier, verdict: 'APPROVED', verifiedFiles: { ...state.verifiedFiles }, stepIdx: minStep, reviewedAt: new Date().toISOString() };
+            persistState();
+          }
+        } catch {}
+      }
 
       if (mandatoryFinalReview && role === 'executor') {
         const modifiedKeys = Object.keys(state.modifiedFiles || {});
@@ -282,7 +329,7 @@ export function runAdvisorHook({ event, payload = {}, pluginDir, fsImpl = fs }) 
       else fsImpl.writeFileSync(logPath, (fsImpl.existsSync(logPath) ? fsImpl.readFileSync(logPath, 'utf8') : '') + logLine, 'utf8');
     } catch {}
     try { process.stderr.write(`[Advisor Mode Error] event=${event}: ${err?.stack || err?.message || String(err)}\n`); } catch {}
-    return {};
+    return neutralOutput(event);
   }
 }
 

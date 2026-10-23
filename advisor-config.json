@@ -17,6 +17,7 @@
   },
   "gates": {
     "planBeforeComplexTask": true,
+    "planGateMinFiles": 2,
     "maxConsecutiveFailures": 2,
     "mandatoryFinalReview": true
   },

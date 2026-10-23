@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { runAdvisorHook } from '../scripts/advisor-hook.mjs';
 
@@ -207,4 +208,66 @@ test('6. CLI execution: verifies standalone stdin/stdout process execution', () 
   const parsed = JSON.parse(output.trim());
   assert.ok(parsed.injectSteps);
   assert.ok(parsed.injectSteps[0].systemMessage.systemMessage.includes('Executor UI'));
+});
+
+test('7. PreToolUse fail-safe allow: disabled, missing config, or exception in fsImpl', (t) => {
+  const env = createTestEnv({ enabled: false });
+  t.after(env.cleanup);
+
+  const resDisabled = runAdvisorHook({ event: 'PreToolUse', payload: { toolName: 'run_command' }, pluginDir: env.pluginDir });
+  assert.deepEqual(resDisabled, { decision: 'allow' });
+
+  const resMissing = runAdvisorHook({ event: 'PreToolUse', payload: { toolName: 'run_command' }, pluginDir: path.join(env.pluginDir, 'nonexistent') });
+  assert.deepEqual(resMissing, { decision: 'allow' });
+
+  const throwingFs = { existsSync: () => { throw new Error('Simulated I/O crash'); } };
+  const resCrash = runAdvisorHook({ event: 'PreToolUse', payload: { toolName: 'run_command' }, pluginDir: env.pluginDir, fsImpl: throwingFs });
+  assert.deepEqual(resCrash, { decision: 'allow' });
+});
+
+test('8. Configurable planGateMinFiles and deterministic ctx_ fallback conversation ID', (t) => {
+  const env = createTestEnv({ gates: { planGateMinFiles: 1 } });
+  t.after(env.cleanup);
+
+  const resGate1 = runAdvisorHook({ event: 'PreToolUse', payload: { conversationId: 'c-gate1', toolName: 'write_file', args: { Path: 'C:/project/first.txt' } }, pluginDir: env.pluginDir });
+  assert.equal(resGate1.decision, 'deny');
+  assert.ok(resGate1.reason.includes('[PRE-TASK PLAN GATE]'));
+
+  const wsPath = 'C:/MyWorkspaces/ProjectAlpha';
+  const expectedHash = 'ctx_' + crypto.createHash('sha256').update(wsPath).digest('hex').slice(0, 16);
+  runAdvisorHook({ event: 'SessionStart', payload: { workspacePaths: [wsPath] }, pluginDir: env.pluginDir });
+  const stateFiles = fs.readdirSync(path.join(env.pluginDir, '.state'));
+  assert.ok(stateFiles.includes(`${expectedHash}.json`), `State file ${expectedHash}.json must exist`);
+});
+
+test('9. Asynchronous transcriptPath verdict inspection in Stop', (t) => {
+  const env = createTestEnv();
+  t.after(env.cleanup);
+
+  const convId = 'c-async-transcript';
+  const fileA = path.join(env.pluginDir, 'fileA.txt');
+  const transcriptFile = path.join(env.pluginDir, 'transcript.jsonl');
+  fs.writeFileSync(fileA, 'modified', 'utf8');
+
+  runAdvisorHook({ event: 'PostToolUse', payload: { conversationId: convId, toolName: 'write_file', args: { Path: fileA }, stepIdx: 5, transcriptPath: transcriptFile }, pluginDir: env.pluginDir });
+  runAdvisorHook({ event: 'PostToolUse', payload: { conversationId: convId, toolName: 'invoke_subagent', args: { TypeName: 'advisor-reviewer' }, stepIdx: 10, transcriptPath: transcriptFile }, pluginDir: env.pluginDir });
+
+  // Without transcript reply yet, Stop blocks because invoke_subagent had no synchronous toolResult
+  const stopBeforeReply = runAdvisorHook({ event: 'Stop', payload: { conversationId: convId, transcriptPath: transcriptFile }, pluginDir: env.pluginDir });
+  assert.equal(stopBeforeReply.decision, 'continue');
+
+  fs.writeFileSync(transcriptFile, JSON.stringify({ step_index: 12, source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'CHANGES_REQUIRED: fix bug' }) + '\n', 'utf8');
+  const stopReq = runAdvisorHook({ event: 'Stop', payload: { conversationId: convId, transcriptPath: transcriptFile }, pluginDir: env.pluginDir });
+  assert.equal(stopReq.decision, 'continue');
+  assert.ok(stopReq.reason.includes('CHANGES_REQUIRED'));
+
+  fs.appendFileSync(transcriptFile, JSON.stringify({ step_index: 15, source: 'SYSTEM', type: 'SYSTEM_MESSAGE', content: 'APPROVED. Looks great!' }) + '\n', 'utf8');
+  const stopApp = runAdvisorHook({ event: 'Stop', payload: { conversationId: convId, transcriptPath: transcriptFile }, pluginDir: env.pluginDir });
+  assert.deepEqual(stopApp, {}, 'Stop must succeed when transcript contains APPROVED after last edit');
+
+  // Editing after transcript approval invalidates review and ignores older transcript approval
+  fs.writeFileSync(fileA, 'edited after approval', 'utf8');
+  runAdvisorHook({ event: 'PostToolUse', payload: { conversationId: convId, toolName: 'write_file', args: { Path: fileA }, stepIdx: 18, transcriptPath: transcriptFile }, pluginDir: env.pluginDir });
+  const stopStale = runAdvisorHook({ event: 'Stop', payload: { conversationId: convId, transcriptPath: transcriptFile }, pluginDir: env.pluginDir });
+  assert.equal(stopStale.decision, 'continue');
 });

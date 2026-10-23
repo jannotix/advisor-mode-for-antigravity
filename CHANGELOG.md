@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [1.1.1] - 2026-10-23
+
+### Added
+- Fail-safe neutral output `{ decision: 'allow' }` in `PreToolUse` when the plugin is disabled, configuration is missing, or unexpected errors occur.
+- Asynchronous subagent verdict inspection via `transcriptPath` in the `Stop` hook, capturing `CHANGES_REQUIRED` or `APPROVED` messages from system events.
+- Configurable `planGateMinFiles` parameter under `gates` in `advisor-config.json` (defaults to 2) to control when multi-file planning gates trigger.
+- Collision-resistant conversation identifier fallback derived deterministically from transcript, artifact, or workspace paths.
+- Extended unit tests in `tests/advisor-hook.test.mjs` verifying fail-safe behavior, asynchronous transcripts, and custom file gating thresholds.
+
 ## [1.1.0] - 2026-10-23
 
 ### Added

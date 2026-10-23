@@ -61,6 +61,7 @@ Settings are stored in `advisor-config.json` inside the plugin directory:
   },
   "gates": {
     "planBeforeComplexTask": true,
+    "planGateMinFiles": 2,
     "maxConsecutiveFailures": 2,
     "mandatoryFinalReview": true
   },
@@ -72,6 +73,7 @@ Settings are stored in `advisor-config.json` inside the plugin directory:
 ```
 
 - `roles.unknownModelRole`: Sets the default role (`"executor"` or `"advisor"`) when the active UI model pattern is unrecognized. Defaults to fail-closed `"executor"`.
+- `gates.planGateMinFiles`: Minimum distinct modified files required before triggering the Pre-Task Plan Gate. Defaults to `2` (set to `1` to require validation before any file edit).
 
 ## Lifecycle Hooks
 
